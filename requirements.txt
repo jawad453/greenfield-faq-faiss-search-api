@@ -1,4 +1,7 @@
-sentence-transformers
-faiss-cpu
+fastapi
+uvicorn[standard]
+openai
 numpy
+faiss-cpu
+sentence-transformers
 pytest
