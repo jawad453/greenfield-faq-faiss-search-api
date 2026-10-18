@@ -1,17 +1,29 @@
 
+import json
 import os
 from pathlib import Path
 
 from fastapi import FastAPI
-from pydantic import BaseModel
 from openai import OpenAI
+from pydantic import BaseModel
 
 from search_faq import search_faq
 
 app = FastAPI(title="GreenField Farmers FAQ API")
 
-BASE_DIR = Path(__file__).resolve().parent.parent
 FALLBACK_ANSWER = "We’ll get back to you shortly"
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+FAQ_PATH = BASE_DIR / "faq.json"
+
+with open(FAQ_PATH, "r", encoding="utf-8") as file:
+    faq_data = json.load(file)
+
+# Assign stable string IDs based on each FAQ's position.
+faq_ids = {
+    faq["question"]: str(index)
+    for index, faq in enumerate(faq_data, start=1)
+}
 
 client = OpenAI() if os.getenv("OPENAI_API_KEY") else None
 
@@ -25,27 +37,41 @@ def home():
     return {"message": "GreenField Farmers FAQ API is running"}
 
 
-@app.post("/ask")
-def ask_question(request: QuestionRequest):
+@app.post("/answer")
+def answer_question(request: QuestionRequest):
     question = request.question.strip()
 
     if not question:
-        return {"question": question, "answer": FALLBACK_ANSWER}
+        return {
+            "answer": FALLBACK_ANSWER,
+            "sources": [],
+        }
 
     results = search_faq(question)
 
     if not results or results[0]["similarity_score"] < 0.45:
-        return {"question": question, "answer": FALLBACK_ANSWER}
+        return {
+            "answer": FALLBACK_ANSWER,
+            "sources": [],
+        }
+
+    # Return FAQ IDs, not complete FAQ objects.
+    sources = [
+        faq_ids[item["question"]]
+        for item in results
+        if item["question"] in faq_ids
+    ]
 
     if client is None:
         return {
-            "question": question,
             "answer": results[0]["answer"],
-            "sources": results[:3],
+            "sources": sources,
         }
 
-    context = "\n".join(
-        f"Q: {item['question']}\nA: {item['answer']}"
+    context = "\n\n".join(
+        f"FAQ ID: {faq_ids.get(item['question'], '')}\n"
+        f"Question: {item['question']}\n"
+        f"Answer: {item['answer']}"
         for item in results
     )
 
@@ -55,15 +81,19 @@ def ask_question(request: QuestionRequest):
             {
                 "role": "system",
                 "content": (
-                    "Answer the user's question using only the supplied "
-                    "FAQ context. Do not invent policies, prices, or facts. "
-                    f"If the context is insufficient, reply exactly: "
+                    "Answer the user's question using only the "
+                    "provided FAQ context. Do not invent facts, "
+                    "prices, or policies. If the context does not "
+                    "answer the question, reply exactly: "
                     f"{FALLBACK_ANSWER}"
                 ),
             },
             {
                 "role": "user",
-                "content": f"FAQ context:\n{context}\n\nQuestion: {question}",
+                "content": (
+                    f"FAQ context:\n{context}\n\n"
+                    f"Question: {question}"
+                ),
             },
         ],
         temperature=0,
@@ -72,7 +102,6 @@ def ask_question(request: QuestionRequest):
     answer = response.choices[0].message.content or FALLBACK_ANSWER
 
     return {
-        "question": question,
         "answer": answer,
-        "sources": results[:3],
+        "sources": sources,
     }
