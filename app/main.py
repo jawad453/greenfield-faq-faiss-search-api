@@ -11,7 +11,7 @@ from search_faq import search_faq
 
 app = FastAPI(title="GreenField Farmers FAQ API")
 
-FALLBACK_ANSWER = "We’ll get back to you shortly"
+FALLBACK_ANSWER = "We\u2019ll get back to you shortly"
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FAQ_PATH = BASE_DIR / "faq.json"
